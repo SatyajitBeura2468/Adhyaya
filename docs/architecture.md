@@ -1,27 +1,34 @@
 # Adhyaya architecture
 
-## Foundation plan
+## Request boundary
 
-The UI is intentionally teacher-first: Home, Create, My Plans, Planner and Settings are the only ordinary-teacher surfaces. Administrators gain school configuration later; a personal teacher must be able to begin after a minimal onboarding step.
+The browser holds only transient interface state. It calls authenticated Next.js route handlers; those handlers obtain the Neon Auth session, mirror the identity into the product `users` table, resolve workspace membership, validate input with Zod, and then query Neon PostgreSQL through Drizzle.
 
-## Curriculum and provenance
+No route trusts a workspace ID, teacher ID, lesson body, or curriculum record supplied by the browser. Export requests contain a lesson ID only and resolve the persisted record after authorization.
 
-`curriculum_versions` identifies a source and academic year. `curriculum_topics` stores grade, subject, book, ordered chapter/topic and structured guidance. The natural-key unique index prevents accidental duplicate topics. A school’s class group (for example `VIII-B`) is deliberately separate from curriculum grade (`Class VIII`).
+## Data model
 
-The import contract requires `sourceUrl`, grade, subject, book, chapter and topic. It reports valid, duplicate and invalid records rather than silently discarding data. Official input sources currently identified are NCERT’s textbook catalogue and CBSE’s 2026–27 curriculum page. Topic guidance may be curated but must say so in provenance.
+The initial migration creates:
 
-## Canonical lesson
+- `users`, `teacher_profiles`, `workspaces`, and `workspace_members` for authenticated identity and roles;
+- `class_sections`, `subjects`, `teacher_assignments`, `timetable_periods`, and `timetable_entries` for school setup;
+- `curriculum_versions → curriculum_classes → curriculum_subjects → curriculum_books → curriculum_chapters → curriculum_topics` for versioned provenance;
+- `lessons` for editable canonical content with relational class, subject, topic, period, workspace, and teacher references.
 
-Every lesson persists relational context and a Zod-validated content object containing title, outcomes, timed sequence, materials, assessment, assignment and teacher notes. This avoids both a spreadsheet-shaped mega-table and over-normalisation of editable lesson prose. Export routes render from the same object.
+The lesson body is validated JSON because outcomes, teaching sequence, materials, assessment, assignment, and teacher notes need frequent teacher-led editing. The rest of the context stays relational so the library, timetable, planner, and authorization checks are queryable.
 
-## Generation
+## Identity and sessions
 
-The deterministic generator takes verified topic guidance and lesson duration. It computes a proportionate five-stage teaching sequence, carries over curriculum outcomes/materials/checks and honours simple constraints such as no homework. There is no runtime model provider.
+Neon Auth is provisioned in the same Neon project. Its database-backed auth schema holds the identity/session source of truth; Adhyaya's `users.auth_user_id` is the stable bridge. Google OAuth is initiated by the custom sign-in screen through the Neon Auth client. The session cache cookie is httpOnly and signed with `NEON_AUTH_COOKIE_SECRET`.
 
-## Security and persistence completion gate
+The page is dynamic and redirects unsigned visitors to sign-in. A first authenticated visit creates a private owner workspace; incomplete setup redirects to onboarding. This avoids hardcoded people, profiles, dates, timetable slots, or sample lessons.
 
-Production mutations must authenticate the user, look up workspace membership server-side, validate selected curriculum relationships and write only inside that workspace. The prepared Drizzle schema and SQL migration establish the essential foreign keys and unique constraints. Neon credentials and Google OAuth credentials are intentionally not in this repository, so persistence/auth are a deploy-time integration gate rather than a client-side imitation.
+## Curriculum import contract
 
-## Exports
+`scripts/import-curriculum.mjs` accepts one versioned JSON source with a complete nested hierarchy. It rejects malformed URLs, missing teaching guidance, malformed year/version values, and duplicate natural topic paths before any database operation. A SHA-256 checksum identifies the imported source version. Every level uses a unique natural key plus `ON CONFLICT` upserts, making re-runs safe.
 
-PDF uses React PDF in a Node route, DOCX uses the `docx` package, and teaching copy invokes the browser print pathway. These are generated from lesson data on demand rather than being treated as the lesson itself.
+`npm run curriculum:audit` validates and reports class, subject, book, chapter, and topic coverage without connecting to the database. The included file is explicitly scoped; more coverage must be derived and reviewed from official CBSE/NCERT documents before importing.
+
+## Exports and generation
+
+Generation is deterministic: duration selects a five-stage time budget, while verified curriculum guidance and optional teaching/assessment preferences determine the content. PDF uses React PDF, DOCX uses `docx`, and print uses the browser from the same saved record. None are alternative data stores.

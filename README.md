@@ -1,50 +1,58 @@
 # Adhyaya
 
-Adhyaya is a calm, structured lesson-planning workspace for CBSE teachers. It makes the essential path deliberately short: select a class, subject, chapter and topic; generate an editable plan; save, reuse and export it.
+Adhyaya is a production lesson-planning workspace for CBSE teachers: sign in with Google, configure the classes and timetable you actually teach, choose a verified curriculum topic, generate a deterministic lesson, edit it, and export it as PDF, DOCX, or print.
 
-## Product approach
+## Production architecture
 
-- No runtime AI, paid-model integration or AI keys. Plans are generated deterministically from curated topic guidance.
-- Curriculum data is versioned and carries source provenance. The intended production source layer is CBSE/NCERT.
-- Lessons are canonical structured JSON; PDF, DOCX, print and teacher-facing views are representations of that same data.
-- The teacher UI stays simple while curriculum coverage, source audits and school configuration remain behind the scenes.
+`Google sign-in → Neon Auth database session → server-side workspace authorization → Neon PostgreSQL / Drizzle → authenticated lesson/export routes`
 
-## Current preview
+- Neon Auth provides managed Google OAuth and database-backed sessions in the same Neon project.
+- The app mirrors each authenticated account in `users`, then scopes every read/write to a `workspace_members` row on the server.
+- First sign-in creates a private workspace. Onboarding persists the teacher profile, school, classes/sections, subjects, teaching periods, and optional weekly timetable.
+- Lesson content is Zod-validated structured JSON alongside relational class, subject, topic, period, teacher, and workspace references.
+- PDF and DOCX routes accept only a saved lesson ID and retrieve the authorized record on the server; the browser cannot export an arbitrary client payload.
+- No runtime model provider or API key is used. Lesson generation is deterministic from structured curriculum guidance, duration, and the selected approach/assessment preference.
 
-The included preview is a fully interactive local/demo runtime with five curated CBSE/NCERT-aligned topics. It supports dependent selection, timed deterministic drafts, editing, save status, draft/ready, timetable prefill, search, reuse, weekly planner and PDF/DOCX/print exports. It deliberately does **not** present the seed as complete nationwide curriculum coverage.
+See [architecture documentation](docs/architecture.md) for the data model and authorization boundary.
 
-## Architecture
+## Curriculum data
 
-Next.js App Router + TypeScript provides the product surface and server-side export routes. PostgreSQL/Neon is represented through Drizzle schema and committed SQL migrations. The production data boundary is:
+Curriculum data lives in structured JSON under `data/curriculum/`, never in React. The included 2026–27 dataset is an official-source-backed Class VIII Mathematics release with 16 ordered NCERT chapter records. It is deliberately labelled to its source and is not a claim of nationwide coverage. Add further class/subject datasets only after verifying their chapter/topic hierarchy from the current official source.
 
-`Browser → authenticated server action/route → Zod validation + workspace authorization → PostgreSQL`
+```bash
+npm run curriculum:audit
+npm run curriculum:import
+```
 
-See [architecture documentation](docs/architecture.md) for the domain model, migration plan and deployment requirements.
+The importer validates the complete hierarchy, rejects malformed or duplicate topic paths, records a source checksum/version, and upserts safely on reruns. It will refuse to run without `DATABASE_URL`.
 
-## Local development
+Official source roots:
+
+- [NCERT textbook catalogue](https://www.ncert.nic.in/textbook.php?iesc1=0-12)
+- [NCERT Class VIII booklet](https://www.ncert.nic.in/pdf/BookletClass8.pdf)
+- [CBSE curriculum portal](https://cbseacademic.nic.in/curriculum_2027.html)
+
+## Environment
+
+Copy `.env.example` to `.env.local` and set:
+
+```bash
+DATABASE_URL=
+NEON_AUTH_BASE_URL=
+NEON_AUTH_COOKIE_SECRET=
+```
+
+All three values are server-only. `NEON_AUTH_COOKIE_SECRET` must be a stable random value of at least 32 characters. Configure the same values as sensitive environment variables in Vercel. Google is enabled from the Neon Auth configuration for the production branch; use Neon-managed credentials or add your own OAuth client there.
+
+## Development and verification
 
 ```bash
 npm install
-cp .env.example .env.local
-npm run dev
+npm run db:generate
+npm run curriculum:audit
 npm run lint
 npm test
 npm run build
 ```
 
-## Database and curriculum import
-
-1. Create a dedicated Neon PostgreSQL project and set `DATABASE_URL` in `.env.local` and Vercel.
-2. Apply the committed migration with `npm run db:migrate`.
-3. Import only source-attributed curriculum records with `npm run curriculum:import -- path/to/curriculum.json`.
-4. Run the coverage audit before claiming a grade/subject/version is supported.
-
-The importer rejects missing provenance and detects duplicate natural keys. Production seed/import work must use current official CBSE and NCERT records, not frontend arrays or one school’s spreadsheet.
-
-## Authentication and deployment
-
-The production design uses Google sign-in with a database-backed session and workspace membership checks. Configure `AUTH_SECRET`, `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` only in the deployment environment; never commit them. Deploy to Vercel after database and OAuth configuration are complete.
-
-## Validation
-
-The generator has unit tests for timing and special constraints. The application is linted, production-built and visually checked at desktop/mobile before release. Add E2E coverage against an authenticated Neon environment before calling the database-backed product V1 complete.
+Run `npm run db:migrate` against a fresh or controlled database only. The committed migration is an initial schema; do not point it at an unrelated database.
