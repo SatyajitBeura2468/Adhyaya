@@ -19,7 +19,7 @@ The lesson body is validated JSON because outcomes, teaching sequence, materials
 
 ## Identity and sessions
 
-Neon Auth is provisioned in the same Neon project. Its database-backed auth schema holds the identity/session source of truth; Adhyaya's `users.auth_user_id` is the stable bridge. Google OAuth is initiated by the custom sign-in screen through the Neon Auth client. The session cache cookie is httpOnly and signed with `NEON_AUTH_COOKIE_SECRET`.
+Neon Auth is provisioned in the same Neon project. Its database-backed auth schema holds the identity/session source of truth; Adhyaya's `users.auth_user_id` is the stable bridge. Google OAuth is initiated by the custom sign-in screen through the Neon Auth client, with the browser's canonical origin as the callback URL. `src/proxy.ts` runs the official Neon Auth middleware on every non-static request: it exchanges the one-time OAuth verifier for app-domain session cookies, validates those cookies before protected routes render, and sends unsigned requests to `/auth/sign-in`. The session cache cookie is httpOnly and signed with `NEON_AUTH_COOKIE_SECRET`.
 
 The page is dynamic and redirects unsigned visitors to sign-in. A first authenticated visit creates a private owner workspace; incomplete setup redirects to onboarding. This avoids hardcoded people, profiles, dates, timetable slots, or sample lessons.
 

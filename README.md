@@ -42,7 +42,9 @@ NEON_AUTH_BASE_URL=
 NEON_AUTH_COOKIE_SECRET=
 ```
 
-All three values are server-only. `NEON_AUTH_COOKIE_SECRET` must be a stable random value of at least 32 characters. Configure the same values as sensitive environment variables in Vercel. Google is enabled from the Neon Auth configuration for the production branch; use Neon-managed credentials or add your own OAuth client there.
+All three values are server-only. `NEON_AUTH_COOKIE_SECRET` must be a stable random value of at least 32 characters and must remain unchanged after deployment. Configure the same values as sensitive environment variables in Vercel.
+
+For a live deployment, add every browser origin used as an OAuth `callbackURL` under **Neon Console → Auth → Configuration → Domains** (with `https://` and no trailing slash). In Google Cloud, the provider redirect URI is the branch-specific `${NEON_AUTH_BASE_URL}/callback/google` - not the Vercel URL. Adhyaya uses `src/proxy.ts` with the official Neon Auth middleware so the OAuth verifier is exchanged for app-domain session cookies before a protected page renders.
 
 ## Development and verification
 
