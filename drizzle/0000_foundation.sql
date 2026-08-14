@@ -1,0 +1,12 @@
+CREATE TYPE "member_role" AS ENUM ('owner', 'teacher');
+CREATE TYPE "lesson_status" AS ENUM ('draft', 'ready');
+CREATE TABLE "users" ("id" uuid PRIMARY KEY DEFAULT gen_random_uuid(), "email" varchar(320) NOT NULL, "name" text NOT NULL, "created_at" timestamptz NOT NULL DEFAULT now());
+CREATE UNIQUE INDEX "users_email_unique" ON "users" ("email");
+CREATE TABLE "workspaces" ("id" uuid PRIMARY KEY DEFAULT gen_random_uuid(), "name" text NOT NULL, "created_at" timestamptz NOT NULL DEFAULT now());
+CREATE TABLE "workspace_members" ("id" uuid PRIMARY KEY DEFAULT gen_random_uuid(), "workspace_id" uuid NOT NULL REFERENCES "workspaces"("id"), "user_id" uuid NOT NULL REFERENCES "users"("id"), "role" "member_role" NOT NULL DEFAULT 'teacher');
+CREATE UNIQUE INDEX "workspace_member_unique" ON "workspace_members" ("workspace_id", "user_id");
+CREATE TABLE "curriculum_versions" ("id" uuid PRIMARY KEY DEFAULT gen_random_uuid(), "board" varchar(80) NOT NULL, "academic_year" varchar(20) NOT NULL, "source_url" text NOT NULL, "source_label" text NOT NULL, "imported_at" timestamptz NOT NULL DEFAULT now());
+CREATE UNIQUE INDEX "curriculum_version_unique" ON "curriculum_versions" ("board", "academic_year");
+CREATE TABLE "curriculum_topics" ("id" uuid PRIMARY KEY DEFAULT gen_random_uuid(), "version_id" uuid NOT NULL REFERENCES "curriculum_versions"("id"), "grade" varchar(20) NOT NULL, "subject" text NOT NULL, "book" text NOT NULL, "chapter_order" integer NOT NULL, "chapter" text NOT NULL, "topic_order" integer NOT NULL, "topic" text NOT NULL, "guidance" jsonb NOT NULL, "provenance" text NOT NULL);
+CREATE UNIQUE INDEX "topic_natural_unique" ON "curriculum_topics" ("version_id", "grade", "subject", "book", "chapter", "topic");
+CREATE TABLE "lessons" ("id" uuid PRIMARY KEY DEFAULT gen_random_uuid(), "workspace_id" uuid NOT NULL REFERENCES "workspaces"("id"), "teacher_id" uuid NOT NULL REFERENCES "users"("id"), "topic_id" uuid NOT NULL REFERENCES "curriculum_topics"("id"), "class_group" text NOT NULL, "lesson_date" timestamptz NOT NULL, "period" varchar(50) NOT NULL, "duration_minutes" integer NOT NULL, "status" "lesson_status" NOT NULL DEFAULT 'draft', "content" jsonb NOT NULL, "deleted_at" timestamptz, "updated_at" timestamptz NOT NULL DEFAULT now());
