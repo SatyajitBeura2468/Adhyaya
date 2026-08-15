@@ -66,9 +66,13 @@ export async function requireViewer(): Promise<ViewerContext> {
   return { userId: user.id, workspaceId: workspace.id, role: "owner", onboardingComplete: false, name: user.name, email: user.email, image: user.image };
 }
 
-async function curriculumRecordsForSubjects(curriculumSubjectIds: string[]) {
-  if (!curriculumSubjectIds.length) return { books: [], chapters: [], topics: [] };
+async function curriculumRecordsForClasses(curriculumClassIds: string[]) {
+  if (!curriculumClassIds.length) return { subjects: [], books: [], chapters: [], topics: [] };
   const database = db();
+  const curriculumSubjectRows = await database.select({ id: curriculumSubjects.id, curriculumClassId: curriculumSubjects.classId, name: curriculumSubjects.name, ordinal: curriculumSubjects.ordinal, canonicalKey: curriculumSubjects.canonicalKey, sourceUrl: curriculumSubjects.sourceUrl, provenance: curriculumSubjects.provenance, sourceType: curriculumSubjects.sourceType })
+    .from(curriculumSubjects).where(inArray(curriculumSubjects.classId, curriculumClassIds)).orderBy(curriculumSubjects.ordinal, curriculumSubjects.name);
+  if (!curriculumSubjectRows.length) return { subjects: [], books: [], chapters: [], topics: [] };
+  const curriculumSubjectIds = curriculumSubjectRows.map((subject) => subject.id);
   const [books, chapters, topics] = await Promise.all([
     database.select({ id: curriculumBooks.id, curriculumSubjectId: curriculumBooks.subjectId, title: curriculumBooks.title, ordinal: curriculumBooks.ordinal, sourceUrl: curriculumBooks.sourceUrl, sourceLabel: curriculumBooks.sourceLabel, sourceType: curriculumBooks.sourceType })
       .from(curriculumBooks).where(inArray(curriculumBooks.subjectId, curriculumSubjectIds)).orderBy(curriculumBooks.ordinal),
@@ -78,7 +82,7 @@ async function curriculumRecordsForSubjects(curriculumSubjectIds: string[]) {
       .from(curriculumTopics).innerJoin(curriculumChapters, eq(curriculumTopics.chapterId, curriculumChapters.id)).innerJoin(curriculumBooks, eq(curriculumChapters.bookId, curriculumBooks.id))
       .where(inArray(curriculumBooks.subjectId, curriculumSubjectIds)).orderBy(curriculumTopics.ordinal),
   ]);
-  return { books, chapters, topics: topics.map((row) => ({ ...row, guidance: row.guidance as { concept: string; outcomes: string[]; activities: string[]; materials: string[]; checks: string[]; assignment: string } })) };
+  return { subjects: curriculumSubjectRows, books, chapters, topics: topics.map((row) => ({ ...row, guidance: row.guidance as { concept: string; outcomes: string[]; activities: string[]; materials: string[]; checks: string[]; assignment: string } })) };
 }
 
 export async function getCurriculumSetupCatalogue(context: ViewerContext): Promise<CurriculumSetupCatalogue> {
@@ -122,7 +126,7 @@ export async function getWorkspaceBootstrap(context: ViewerContext): Promise<Wor
     database.select({ id: timetablePeriods.id, label: timetablePeriods.label, ordinal: timetablePeriods.ordinal, startsAt: timetablePeriods.startsAt, endsAt: timetablePeriods.endsAt }).from(timetablePeriods).where(eq(timetablePeriods.workspaceId, context.workspaceId)),
     database.select({ id: timetableEntries.id, weekday: timetableEntries.weekday, periodId: timetableEntries.periodId, classSectionId: timetableEntries.classSectionId, subjectId: timetableEntries.subjectId }).from(timetableEntries).where(eq(timetableEntries.workspaceId, context.workspaceId)),
   ]);
-  const curriculum = await curriculumRecordsForSubjects(assignments.flatMap((assignment) => assignment.curriculumSubjectId ? [assignment.curriculumSubjectId] : []));
+  const curriculum = await curriculumRecordsForClasses([...new Set(classes.flatMap((classSection) => classSection.curriculumClassId ? [classSection.curriculumClassId] : []))]);
   return { viewer: { name: context.name, email: context.email, image: context.image, workspaceName: workspace.name, schoolName: workspace.schoolName }, lessons: lessonList, classes, subjects: workspaceSubjects, assignments, periods: periods.sort((a, b) => a.ordinal - b.ordinal), timetable, curriculum };
 }
 
@@ -205,22 +209,26 @@ export async function saveSetup(context: ViewerContext, input: unknown) {
   }
 }
 
-const createLessonSchema = z.object({ classSectionId: z.string().uuid(), subjectId: z.string().uuid(), topicId: z.string().uuid(), timetablePeriodId: z.string().uuid().nullable().optional(), date: z.string().date(), duration: z.number().int().min(20).max(120), special: z.string().max(600).optional(), approach: z.string().max(80).optional(), assessmentPreference: z.string().max(80).optional() });
+const createLessonSchema = z.object({ classSectionId: z.string().uuid(), curriculumSubjectId: z.string().uuid(), topicId: z.string().uuid(), timetablePeriodId: z.string().uuid().nullable().optional(), date: z.string().date(), duration: z.number().int().min(20).max(120), special: z.string().max(600).optional(), approach: z.string().max(80).optional(), assessmentPreference: z.string().max(80).optional() });
 
-async function ownedAssignment(context: ViewerContext, classSectionId: string, subjectId: string) {
+async function ownedOrCreatedAssignment(context: ViewerContext, classSectionId: string, curriculumSubjectId: string) {
   const database = db();
-  const [[classSection], [assignment]] = await Promise.all([
-    database.select().from(classSections).where(and(eq(classSections.id, classSectionId), eq(classSections.workspaceId, context.workspaceId))).limit(1),
-    database.select({ curriculumSubjectId: teacherAssignments.curriculumSubjectId }).from(teacherAssignments).where(and(eq(teacherAssignments.workspaceId, context.workspaceId), eq(teacherAssignments.teacherId, context.userId), eq(teacherAssignments.classSectionId, classSectionId), eq(teacherAssignments.subjectId, subjectId))).limit(1),
+  const [[classSection], [canonicalSubject]] = await Promise.all([
+    database.select({ id: classSections.id, curriculumClassId: classSections.curriculumClassId }).from(classSections).where(and(eq(classSections.id, classSectionId), eq(classSections.workspaceId, context.workspaceId), eq(classSections.active, true))).limit(1),
+    database.select({ id: curriculumSubjects.id, classId: curriculumSubjects.classId, name: curriculumSubjects.name }).from(curriculumSubjects).where(eq(curriculumSubjects.id, curriculumSubjectId)).limit(1),
   ]);
-  if (!classSection || !assignment) throw new AuthorizationError("That class-subject teaching assignment is not part of this workspace.");
-  if (!classSection.curriculumClassId || !assignment.curriculumSubjectId) throw new AuthorizationError("This teaching assignment needs a verified curriculum mapping before a lesson can be created.");
-  return assignment.curriculumSubjectId;
+  if (!classSection?.curriculumClassId) throw new AuthorizationError("This class section needs a verified curriculum class before a lesson can be created.");
+  if (!canonicalSubject || canonicalSubject.classId !== classSection.curriculumClassId) throw new AuthorizationError("The selected subject is not part of this class's verified curriculum.");
+  const [workspaceSubject] = await database.insert(subjects).values({ workspaceId: context.workspaceId, name: canonicalSubject.name })
+    .onConflictDoUpdate({ target: [subjects.workspaceId, subjects.name], set: { active: true } }).returning({ id: subjects.id });
+  await database.insert(teacherAssignments).values({ workspaceId: context.workspaceId, teacherId: context.userId, classSectionId, subjectId: workspaceSubject!.id, curriculumSubjectId: canonicalSubject.id })
+    .onConflictDoUpdate({ target: [teacherAssignments.teacherId, teacherAssignments.classSectionId, teacherAssignments.subjectId], set: { curriculumSubjectId: canonicalSubject.id } });
+  return { curriculumSubjectId: canonicalSubject.id, workspaceSubjectId: workspaceSubject!.id };
 }
 
 export async function createLesson(context: ViewerContext, input: unknown) {
   const values = createLessonSchema.parse(input);
-  const curriculumSubjectId = await ownedAssignment(context, values.classSectionId, values.subjectId);
+  const assignment = await ownedOrCreatedAssignment(context, values.classSectionId, values.curriculumSubjectId);
   const [topic] = await db().select({
     id: curriculumTopics.id, topic: curriculumTopics.title, guidance: curriculumTopics.guidance, provenance: curriculumTopics.provenance, sourceUrl: curriculumTopics.sourceUrl,
     chapter: curriculumChapters.title, book: curriculumBooks.title, subject: curriculumSubjects.name, grade: curriculumClasses.name,
@@ -229,10 +237,10 @@ export async function createLesson(context: ViewerContext, input: unknown) {
     .innerJoin(curriculumBooks, eq(curriculumChapters.bookId, curriculumBooks.id))
     .innerJoin(curriculumSubjects, eq(curriculumBooks.subjectId, curriculumSubjects.id))
     .innerJoin(curriculumClasses, eq(curriculumSubjects.classId, curriculumClasses.id))
-    .where(and(eq(curriculumTopics.id, values.topicId), eq(curriculumBooks.subjectId, curriculumSubjectId))).limit(1);
+    .where(and(eq(curriculumTopics.id, values.topicId), eq(curriculumBooks.subjectId, assignment.curriculumSubjectId))).limit(1);
   if (!topic) throw new Error("The selected curriculum topic is unavailable.");
   const content = generateLesson({ ...topic, guidance: topic.guidance as Parameters<typeof generateLesson>[0]["guidance"] }, { duration: values.duration, special: values.special, approach: values.approach, assessmentPreference: values.assessmentPreference });
-  const [lesson] = await db().insert(lessons).values({ workspaceId: context.workspaceId, teacherId: context.userId, classSectionId: values.classSectionId, subjectId: values.subjectId, topicId: values.topicId, timetablePeriodId: values.timetablePeriodId ?? null, lessonDate: values.date, durationMinutes: values.duration, content }).returning({ id: lessons.id });
+  const [lesson] = await db().insert(lessons).values({ workspaceId: context.workspaceId, teacherId: context.userId, classSectionId: values.classSectionId, subjectId: assignment.workspaceSubjectId, topicId: values.topicId, timetablePeriodId: values.timetablePeriodId ?? null, lessonDate: values.date, durationMinutes: values.duration, content }).returning({ id: lessons.id });
   return lesson;
 }
 

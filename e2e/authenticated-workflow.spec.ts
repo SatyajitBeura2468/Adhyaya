@@ -5,7 +5,7 @@ const authenticated = Boolean(process.env.E2E_STORAGE_STATE);
 test.describe("authenticated teacher workflow", () => {
   test.skip(!authenticated, "Set E2E_STORAGE_STATE to a dedicated Google-authenticated teacher session.");
 
-  test("assigns a canonical subject and persists a lesson through export", async ({ page }) => {
+  test("creates a missing assignment through canonical lesson selection and persists through export", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: /good (morning|afternoon|evening)/i })).toBeVisible();
 
@@ -17,9 +17,6 @@ test.describe("authenticated teacher workflow", () => {
     await settingsClassSelect.selectOption({ index: 1 });
     const settingsSubjectSelect = page.getByLabel("Verified subject");
     await expect(settingsSubjectSelect).toBeEnabled();
-    await settingsSubjectSelect.selectOption({ index: 1 });
-    await page.getByRole("button", { name: "Assign verified subject" }).click();
-    await expect(page.getByText("Verified subject assigned.")).toBeVisible();
 
     await page.getByRole("button", { name: "Create" }).click();
     await expect(page.getByRole("heading", { name: "Create lesson" })).toBeVisible();
@@ -39,6 +36,10 @@ test.describe("authenticated teacher workflow", () => {
     await topicSelect.selectOption({ index: 1 });
     await page.getByRole("button", { name: "Generate lesson plan" }).click();
     await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: "Settings" }).click();
+    await expect(page.getByText(/verified teaching assignment.*saved/i)).toBeVisible();
+    await page.getByRole("button", { name: "Create" }).click();
 
     const sequence = page.getByLabel(/teaching action/i).first();
     await sequence.fill("Updated in authenticated E2E coverage.");

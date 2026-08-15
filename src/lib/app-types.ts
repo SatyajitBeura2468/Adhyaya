@@ -43,7 +43,7 @@ export type WorkspaceBootstrap = {
   assignments: AssignmentRecord[];
   periods: PeriodRecord[];
   timetable: TimetableRecord[];
-  curriculum: { books: CurriculumBookRecord[]; chapters: CurriculumChapterRecord[]; topics: CurriculumTopicRecord[] };
+  curriculum: { subjects: CurriculumSubjectRecord[]; books: CurriculumBookRecord[]; chapters: CurriculumChapterRecord[]; topics: CurriculumTopicRecord[] };
 };
 
 export type CurriculumSetupCatalogue = { classes: CurriculumClassRecord[]; subjects: CurriculumSubjectRecord[] };
