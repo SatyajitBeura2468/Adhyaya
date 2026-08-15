@@ -137,6 +137,29 @@ const setupSchema = z.object({
   timetable: z.array(z.object({ weekday: z.number().int().min(1).max(7), periodIndex: z.number().int().min(0), assignmentIndex: z.number().int().min(0) })).max(84).default([]),
 });
 
+const canonicalAssignmentSchema = z.object({
+  classSectionId: z.string().uuid(),
+  curriculumSubjectId: z.string().uuid(),
+});
+
+export async function assignCanonicalSubject(context: ViewerContext, input: unknown) {
+  if (context.role !== "owner") throw new AuthorizationError("Only workspace owners can change curriculum assignments.");
+  const values = canonicalAssignmentSchema.parse(input);
+  const database = db();
+  const [[classSection], [canonicalSubject]] = await Promise.all([
+    database.select({ id: classSections.id, curriculumClassId: classSections.curriculumClassId }).from(classSections)
+      .where(and(eq(classSections.id, values.classSectionId), eq(classSections.workspaceId, context.workspaceId), eq(classSections.active, true))).limit(1),
+    database.select({ id: curriculumSubjects.id, classId: curriculumSubjects.classId, name: curriculumSubjects.name }).from(curriculumSubjects)
+      .where(eq(curriculumSubjects.id, values.curriculumSubjectId)).limit(1),
+  ]);
+  if (!classSection?.curriculumClassId) throw new Error("This class section needs a verified canonical class before a subject can be assigned.");
+  if (!canonicalSubject || canonicalSubject.classId !== classSection.curriculumClassId) throw new Error("Choose a verified subject from this class only.");
+  const [workspaceSubject] = await database.insert(subjects).values({ workspaceId: context.workspaceId, name: canonicalSubject.name })
+    .onConflictDoUpdate({ target: [subjects.workspaceId, subjects.name], set: { active: true } }).returning({ id: subjects.id });
+  await database.insert(teacherAssignments).values({ workspaceId: context.workspaceId, teacherId: context.userId, classSectionId: classSection.id, subjectId: workspaceSubject!.id, curriculumSubjectId: canonicalSubject.id })
+    .onConflictDoUpdate({ target: [teacherAssignments.teacherId, teacherAssignments.classSectionId, teacherAssignments.subjectId], set: { curriculumSubjectId: canonicalSubject.id } });
+}
+
 export async function saveSetup(context: ViewerContext, input: unknown) {
   if (context.role !== "owner") throw new AuthorizationError("Only workspace owners can change setup.");
   const values = setupSchema.parse(normalizeOnboardingInput(input));
