@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -10,16 +10,18 @@ import {
   curriculumClasses,
   curriculumSubjects,
   curriculumTopics,
+  curriculumVersions,
   lessons,
   subjects,
   teacherProfiles,
+  teacherAssignments,
   timetableEntries,
   timetablePeriods,
   users,
   workspaceMembers,
   workspaces,
 } from "@/db/schema";
-import type { CurriculumRecord, LessonRecord, WorkspaceBootstrap } from "@/lib/app-types";
+import type { CurriculumSetupCatalogue, LessonRecord, WorkspaceBootstrap } from "@/lib/app-types";
 import { auth, authConfigured } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { generateLesson, lessonContentSchema } from "@/lib/lesson";
@@ -64,16 +66,33 @@ export async function requireViewer(): Promise<ViewerContext> {
   return { userId: user.id, workspaceId: workspace.id, role: "owner", onboardingComplete: false, name: user.name, email: user.email, image: user.image };
 }
 
-async function curriculumRows(): Promise<CurriculumRecord[]> {
-  const rows = await db().select({
-    id: curriculumTopics.id, topic: curriculumTopics.title, guidance: curriculumTopics.guidance, provenance: curriculumTopics.provenance, sourceUrl: curriculumTopics.sourceUrl,
-    chapter: curriculumChapters.title, book: curriculumBooks.title, subject: curriculumSubjects.name, grade: curriculumClasses.name,
-  }).from(curriculumTopics)
-    .innerJoin(curriculumChapters, eq(curriculumTopics.chapterId, curriculumChapters.id))
-    .innerJoin(curriculumBooks, eq(curriculumChapters.bookId, curriculumBooks.id))
-    .innerJoin(curriculumSubjects, eq(curriculumBooks.subjectId, curriculumSubjects.id))
-    .innerJoin(curriculumClasses, eq(curriculumSubjects.classId, curriculumClasses.id));
-  return rows.map((row) => ({ ...row, guidance: row.guidance as CurriculumRecord["guidance"] }));
+async function curriculumRecordsForSubjects(curriculumSubjectIds: string[]) {
+  if (!curriculumSubjectIds.length) return { books: [], chapters: [], topics: [] };
+  const database = db();
+  const [books, chapters, topics] = await Promise.all([
+    database.select({ id: curriculumBooks.id, curriculumSubjectId: curriculumBooks.subjectId, title: curriculumBooks.title, ordinal: curriculumBooks.ordinal, sourceUrl: curriculumBooks.sourceUrl, sourceLabel: curriculumBooks.sourceLabel, sourceType: curriculumBooks.sourceType })
+      .from(curriculumBooks).where(inArray(curriculumBooks.subjectId, curriculumSubjectIds)).orderBy(curriculumBooks.ordinal),
+    database.select({ id: curriculumChapters.id, bookId: curriculumChapters.bookId, title: curriculumChapters.title, ordinal: curriculumChapters.ordinal })
+      .from(curriculumChapters).innerJoin(curriculumBooks, eq(curriculumChapters.bookId, curriculumBooks.id)).where(inArray(curriculumBooks.subjectId, curriculumSubjectIds)).orderBy(curriculumChapters.ordinal),
+    database.select({ id: curriculumTopics.id, chapterId: curriculumTopics.chapterId, title: curriculumTopics.title, guidance: curriculumTopics.guidance, provenance: curriculumTopics.provenance, sourceUrl: curriculumTopics.sourceUrl })
+      .from(curriculumTopics).innerJoin(curriculumChapters, eq(curriculumTopics.chapterId, curriculumChapters.id)).innerJoin(curriculumBooks, eq(curriculumChapters.bookId, curriculumBooks.id))
+      .where(inArray(curriculumBooks.subjectId, curriculumSubjectIds)).orderBy(curriculumTopics.ordinal),
+  ]);
+  return { books, chapters, topics: topics.map((row) => ({ ...row, guidance: row.guidance as { concept: string; outcomes: string[]; activities: string[]; materials: string[]; checks: string[]; assignment: string } })) };
+}
+
+export async function getCurriculumSetupCatalogue(context: ViewerContext): Promise<CurriculumSetupCatalogue> {
+  const database = db();
+  const [workspace] = await database.select({ academicYear: workspaces.academicYear }).from(workspaces).where(eq(workspaces.id, context.workspaceId)).limit(1);
+  if (!workspace) throw new AuthorizationError("Workspace not found.");
+  const [version] = await database.select({ id: curriculumVersions.id }).from(curriculumVersions).where(eq(curriculumVersions.academicYear, workspace.academicYear)).orderBy(desc(curriculumVersions.importedAt)).limit(1);
+  if (!version) return { classes: [], subjects: [] };
+  const [classes, subjects] = await Promise.all([
+    database.select({ id: curriculumClasses.id, name: curriculumClasses.name, ordinal: curriculumClasses.ordinal, canonicalKey: curriculumClasses.canonicalKey }).from(curriculumClasses).where(eq(curriculumClasses.versionId, version.id)).orderBy(curriculumClasses.ordinal),
+    database.select({ id: curriculumSubjects.id, curriculumClassId: curriculumSubjects.classId, name: curriculumSubjects.name, ordinal: curriculumSubjects.ordinal, canonicalKey: curriculumSubjects.canonicalKey, sourceUrl: curriculumSubjects.sourceUrl, provenance: curriculumSubjects.provenance, sourceType: curriculumSubjects.sourceType })
+      .from(curriculumSubjects).innerJoin(curriculumClasses, eq(curriculumSubjects.classId, curriculumClasses.id)).where(eq(curriculumClasses.versionId, version.id)).orderBy(curriculumSubjects.ordinal),
+  ]);
+  return { classes, subjects };
 }
 
 export async function getWorkspaceBootstrap(context: ViewerContext): Promise<WorkspaceBootstrap> {
@@ -95,14 +114,16 @@ export async function getWorkspaceBootstrap(context: ViewerContext): Promise<Wor
     classGroup: row.classGroup, subject: row.subject, chapter: row.chapter, topic: row.topic, period: row.period ?? "Unscheduled",
     content: lessonContentSchema.parse(row.content),
   }));
-  const [classes, workspaceSubjects, periods, timetable, curriculum] = await Promise.all([
-    database.select({ id: classSections.id, grade: classSections.grade, section: classSections.section, label: classSections.label }).from(classSections).where(and(eq(classSections.workspaceId, context.workspaceId), eq(classSections.active, true))),
+  const [classes, workspaceSubjects, assignments, periods, timetable] = await Promise.all([
+    database.select({ id: classSections.id, grade: classSections.grade, section: classSections.section, label: classSections.label, curriculumClassId: classSections.curriculumClassId }).from(classSections).where(and(eq(classSections.workspaceId, context.workspaceId), eq(classSections.active, true))),
     database.select({ id: subjects.id, name: subjects.name }).from(subjects).where(and(eq(subjects.workspaceId, context.workspaceId), eq(subjects.active, true))),
+    database.select({ id: teacherAssignments.id, classSectionId: teacherAssignments.classSectionId, subjectId: teacherAssignments.subjectId, curriculumSubjectId: teacherAssignments.curriculumSubjectId, curriculumSubjectName: curriculumSubjects.name, curriculumClassId: curriculumSubjects.classId })
+      .from(teacherAssignments).leftJoin(curriculumSubjects, eq(teacherAssignments.curriculumSubjectId, curriculumSubjects.id)).where(and(eq(teacherAssignments.workspaceId, context.workspaceId), eq(teacherAssignments.teacherId, context.userId))),
     database.select({ id: timetablePeriods.id, label: timetablePeriods.label, ordinal: timetablePeriods.ordinal, startsAt: timetablePeriods.startsAt, endsAt: timetablePeriods.endsAt }).from(timetablePeriods).where(eq(timetablePeriods.workspaceId, context.workspaceId)),
     database.select({ id: timetableEntries.id, weekday: timetableEntries.weekday, periodId: timetableEntries.periodId, classSectionId: timetableEntries.classSectionId, subjectId: timetableEntries.subjectId }).from(timetableEntries).where(eq(timetableEntries.workspaceId, context.workspaceId)),
-    curriculumRows(),
   ]);
-  return { viewer: { name: context.name, email: context.email, image: context.image, workspaceName: workspace.name, schoolName: workspace.schoolName }, lessons: lessonList, classes, subjects: workspaceSubjects, periods: periods.sort((a, b) => a.ordinal - b.ordinal), timetable, curriculum };
+  const curriculum = await curriculumRecordsForSubjects(assignments.flatMap((assignment) => assignment.curriculumSubjectId ? [assignment.curriculumSubjectId] : []));
+  return { viewer: { name: context.name, email: context.email, image: context.image, workspaceName: workspace.name, schoolName: workspace.schoolName }, lessons: lessonList, classes, subjects: workspaceSubjects, assignments, periods: periods.sort((a, b) => a.ordinal - b.ordinal), timetable, curriculum };
 }
 
 const setupSchema = z.object({
@@ -110,25 +131,44 @@ const setupSchema = z.object({
   schoolName: z.string().trim().max(180).optional().nullable(),
   displayName: z.string().trim().min(2).max(120),
   defaultDurationMinutes: z.number().int().min(20).max(120).default(45),
-  classes: z.array(z.object({ grade: z.string().trim().min(1).max(20), section: z.string().trim().min(1).max(20) })).min(1).max(30),
-  subjects: z.array(z.string().trim().min(2).max(120)).min(1).max(30),
+  classes: z.array(z.object({ curriculumClassId: z.string().uuid(), section: z.string().trim().min(1).max(20), label: z.string().trim().min(1).max(120).optional() })).min(1).max(30),
+  assignments: z.array(z.object({ classIndex: z.number().int().min(0), curriculumSubjectId: z.string().uuid(), label: z.string().trim().min(2).max(120).optional() })).min(1).max(90),
   periods: z.array(z.object({ label: z.string().trim().min(1).max(50), startsAt: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(), endsAt: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional() })).min(1).max(12),
-  timetable: z.array(z.object({ weekday: z.number().int().min(1).max(7), periodIndex: z.number().int().min(0), classIndex: z.number().int().min(0), subjectIndex: z.number().int().min(0) })).max(84).default([]),
+  timetable: z.array(z.object({ weekday: z.number().int().min(1).max(7), periodIndex: z.number().int().min(0), assignmentIndex: z.number().int().min(0) })).max(84).default([]),
 });
 
 export async function saveSetup(context: ViewerContext, input: unknown) {
   if (context.role !== "owner") throw new AuthorizationError("Only workspace owners can change setup.");
   const values = setupSchema.parse(normalizeOnboardingInput(input));
   const database = db();
+  const curriculumClassIds = values.classes.map((item) => item.curriculumClassId);
+  const curriculumSubjectIds = values.assignments.map((item) => item.curriculumSubjectId);
+  const [canonicalClasses, canonicalSubjects] = await Promise.all([
+    database.select({ id: curriculumClasses.id, name: curriculumClasses.name }).from(curriculumClasses).where(inArray(curriculumClasses.id, curriculumClassIds)),
+    database.select({ id: curriculumSubjects.id, classId: curriculumSubjects.classId, name: curriculumSubjects.name }).from(curriculumSubjects).where(inArray(curriculumSubjects.id, curriculumSubjectIds)),
+  ]);
+  if (canonicalClasses.length !== new Set(curriculumClassIds).size) throw new Error("One or more selected classes are no longer in the verified curriculum.");
+  if (canonicalSubjects.length !== new Set(curriculumSubjectIds).size) throw new Error("One or more selected subjects are no longer in the verified curriculum.");
+  const canonicalClassById = new Map(canonicalClasses.map((item) => [item.id, item]));
+  const canonicalSubjectById = new Map(canonicalSubjects.map((item) => [item.id, item]));
+  const classAssignmentCounts = new Map<number, number>();
+  for (const assignment of values.assignments) {
+    const classEntry = values.classes[assignment.classIndex]; const subjectEntry = canonicalSubjectById.get(assignment.curriculumSubjectId);
+    if (!classEntry || !subjectEntry || subjectEntry.classId !== classEntry.curriculumClassId) throw new Error("Each subject must belong to the selected canonical class.");
+    classAssignmentCounts.set(assignment.classIndex, (classAssignmentCounts.get(assignment.classIndex) ?? 0) + 1);
+  }
+  if (values.classes.some((_, index) => !classAssignmentCounts.get(index))) throw new Error("Add at least one verified subject for every class section.");
   await database.update(workspaces).set({ name: values.workspaceName, schoolName: values.schoolName || null, onboardingCompletedAt: new Date(), updatedAt: new Date() }).where(eq(workspaces.id, context.workspaceId));
   await database.insert(teacherProfiles).values({ userId: context.userId, displayName: values.displayName, defaultDurationMinutes: values.defaultDurationMinutes, updatedAt: new Date() }).onConflictDoUpdate({ target: teacherProfiles.userId, set: { displayName: values.displayName, defaultDurationMinutes: values.defaultDurationMinutes, updatedAt: new Date() } });
   const classRows = await Promise.all(values.classes.map(async (item) => {
-    const label = `${item.grade}-${item.section}`;
-    const [row] = await database.insert(classSections).values({ workspaceId: context.workspaceId, grade: item.grade, section: item.section, label }).onConflictDoUpdate({ target: [classSections.workspaceId, classSections.grade, classSections.section], set: { label, active: true } }).returning();
+    const canonicalClass = canonicalClassById.get(item.curriculumClassId)!; const label = item.label || `${canonicalClass.name}-${item.section}`;
+    const [row] = await database.insert(classSections).values({ workspaceId: context.workspaceId, grade: canonicalClass.name, section: item.section, label, curriculumClassId: canonicalClass.id }).onConflictDoUpdate({ target: [classSections.workspaceId, classSections.grade, classSections.section], set: { label, curriculumClassId: canonicalClass.id, active: true } }).returning();
     return row!;
   }));
-  const subjectRows = await Promise.all(values.subjects.map(async (name) => {
+  const assignmentRows = await Promise.all(values.assignments.map(async (assignment) => {
+    const canonicalSubject = canonicalSubjectById.get(assignment.curriculumSubjectId)!; const classSection = classRows[assignment.classIndex]!; const name = assignment.label || canonicalSubject.name;
     const [row] = await database.insert(subjects).values({ workspaceId: context.workspaceId, name }).onConflictDoUpdate({ target: [subjects.workspaceId, subjects.name], set: { active: true } }).returning();
+    await database.insert(teacherAssignments).values({ workspaceId: context.workspaceId, teacherId: context.userId, classSectionId: classSection.id, subjectId: row!.id, curriculumSubjectId: canonicalSubject.id }).onConflictDoUpdate({ target: [teacherAssignments.teacherId, teacherAssignments.classSectionId, teacherAssignments.subjectId], set: { curriculumSubjectId: canonicalSubject.id } });
     return row!;
   }));
   const periodRows = await Promise.all(values.periods.map(async (period, index) => {
@@ -136,7 +176,7 @@ export async function saveSetup(context: ViewerContext, input: unknown) {
     return row!;
   }));
   for (const entry of values.timetable) {
-    const period = periodRows[entry.periodIndex]; const classSection = classRows[entry.classIndex]; const subject = subjectRows[entry.subjectIndex];
+    const period = periodRows[entry.periodIndex]; const assignment = values.assignments[entry.assignmentIndex]; const classSection = assignment ? classRows[assignment.classIndex] : undefined; const subject = assignment ? assignmentRows[entry.assignmentIndex] : undefined;
     if (!period || !classSection || !subject) continue;
     await database.insert(timetableEntries).values({ workspaceId: context.workspaceId, weekday: entry.weekday, periodId: period.id, classSectionId: classSection.id, subjectId: subject.id }).onConflictDoUpdate({ target: [timetableEntries.workspaceId, timetableEntries.weekday, timetableEntries.periodId], set: { classSectionId: classSection.id, subjectId: subject.id } });
   }
@@ -144,21 +184,31 @@ export async function saveSetup(context: ViewerContext, input: unknown) {
 
 const createLessonSchema = z.object({ classSectionId: z.string().uuid(), subjectId: z.string().uuid(), topicId: z.string().uuid(), timetablePeriodId: z.string().uuid().nullable().optional(), date: z.string().date(), duration: z.number().int().min(20).max(120), special: z.string().max(600).optional(), approach: z.string().max(80).optional(), assessmentPreference: z.string().max(80).optional() });
 
-async function ownedSetup(context: ViewerContext, classSectionId: string, subjectId: string) {
+async function ownedAssignment(context: ViewerContext, classSectionId: string, subjectId: string) {
   const database = db();
-  const [[classSection], [subject]] = await Promise.all([
+  const [[classSection], [assignment]] = await Promise.all([
     database.select().from(classSections).where(and(eq(classSections.id, classSectionId), eq(classSections.workspaceId, context.workspaceId))).limit(1),
-    database.select().from(subjects).where(and(eq(subjects.id, subjectId), eq(subjects.workspaceId, context.workspaceId))).limit(1),
+    database.select({ curriculumSubjectId: teacherAssignments.curriculumSubjectId }).from(teacherAssignments).where(and(eq(teacherAssignments.workspaceId, context.workspaceId), eq(teacherAssignments.teacherId, context.userId), eq(teacherAssignments.classSectionId, classSectionId), eq(teacherAssignments.subjectId, subjectId))).limit(1),
   ]);
-  if (!classSection || !subject) throw new AuthorizationError("That class or subject is not part of this workspace.");
+  if (!classSection || !assignment) throw new AuthorizationError("That class-subject teaching assignment is not part of this workspace.");
+  if (!classSection.curriculumClassId || !assignment.curriculumSubjectId) throw new AuthorizationError("This teaching assignment needs a verified curriculum mapping before a lesson can be created.");
+  return assignment.curriculumSubjectId;
 }
 
 export async function createLesson(context: ViewerContext, input: unknown) {
   const values = createLessonSchema.parse(input);
-  await ownedSetup(context, values.classSectionId, values.subjectId);
-  const topic = (await curriculumRows()).find((item) => item.id === values.topicId);
+  const curriculumSubjectId = await ownedAssignment(context, values.classSectionId, values.subjectId);
+  const [topic] = await db().select({
+    id: curriculumTopics.id, topic: curriculumTopics.title, guidance: curriculumTopics.guidance, provenance: curriculumTopics.provenance, sourceUrl: curriculumTopics.sourceUrl,
+    chapter: curriculumChapters.title, book: curriculumBooks.title, subject: curriculumSubjects.name, grade: curriculumClasses.name,
+  }).from(curriculumTopics)
+    .innerJoin(curriculumChapters, eq(curriculumTopics.chapterId, curriculumChapters.id))
+    .innerJoin(curriculumBooks, eq(curriculumChapters.bookId, curriculumBooks.id))
+    .innerJoin(curriculumSubjects, eq(curriculumBooks.subjectId, curriculumSubjects.id))
+    .innerJoin(curriculumClasses, eq(curriculumSubjects.classId, curriculumClasses.id))
+    .where(and(eq(curriculumTopics.id, values.topicId), eq(curriculumBooks.subjectId, curriculumSubjectId))).limit(1);
   if (!topic) throw new Error("The selected curriculum topic is unavailable.");
-  const content = generateLesson(topic, { duration: values.duration, special: values.special, approach: values.approach, assessmentPreference: values.assessmentPreference });
+  const content = generateLesson({ ...topic, guidance: topic.guidance as Parameters<typeof generateLesson>[0]["guidance"] }, { duration: values.duration, special: values.special, approach: values.approach, assessmentPreference: values.assessmentPreference });
   const [lesson] = await db().insert(lessons).values({ workspaceId: context.workspaceId, teacherId: context.userId, classSectionId: values.classSectionId, subjectId: values.subjectId, topicId: values.topicId, timetablePeriodId: values.timetablePeriodId ?? null, lessonDate: values.date, durationMinutes: values.duration, content }).returning({ id: lessons.id });
   return lesson;
 }

@@ -60,6 +60,9 @@ export const classSections = pgTable("class_sections", {
   grade: varchar("grade", { length: 20 }).notNull(),
   section: varchar("section", { length: 20 }).notNull(),
   label: text("label").notNull(),
+  // A teacher-facing label is intentionally separate from the verified class
+  // identity used to resolve curriculum.
+  curriculumClassId: uuid("curriculum_class_id").references(() => curriculumClasses.id),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [uniqueIndex("class_sections_workspace_grade_section_unique").on(table.workspaceId, table.grade, table.section)]);
@@ -79,7 +82,13 @@ export const teacherAssignments = pgTable("teacher_assignments", {
   teacherId: uuid("teacher_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   classSectionId: uuid("class_section_id").notNull().references(() => classSections.id, { onDelete: "cascade" }),
   subjectId: uuid("subject_id").notNull().references(() => subjects.id, { onDelete: "cascade" }),
-}, (table) => [uniqueIndex("teacher_assignment_unique").on(table.teacherId, table.classSectionId, table.subjectId)]);
+  // This is the authoritative bridge between a workspace subject label and
+  // exactly one class-specific curriculum subject.
+  curriculumSubjectId: uuid("curriculum_subject_id").references(() => curriculumSubjects.id),
+}, (table) => [
+  uniqueIndex("teacher_assignment_unique").on(table.teacherId, table.classSectionId, table.subjectId),
+  uniqueIndex("teacher_assignment_curriculum_subject_unique").on(table.teacherId, table.classSectionId, table.curriculumSubjectId),
+]);
 
 export const timetablePeriods = pgTable("timetable_periods", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -106,22 +115,68 @@ export const curriculumVersions = pgTable("curriculum_versions", {
   sourceUrl: text("source_url").notNull(),
   sourceLabel: text("source_label").notNull(),
   checksum: varchar("checksum", { length: 128 }).notNull(),
+  canonicalKey: varchar("canonical_key", { length: 160 }),
+  sourceType: varchar("source_type", { length: 40 }),
+  sourceVersion: varchar("source_version", { length: 80 }),
   importedAt: timestamp("imported_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [uniqueIndex("curriculum_version_unique").on(table.board, table.academicYear, table.checksum)]);
+
+export const curriculumSources = pgTable("curriculum_sources", {
+  id: varchar("id", { length: 180 }).primaryKey(),
+  authority: varchar("authority", { length: 80 }).notNull(),
+  title: text("title").notNull(),
+  sourceType: varchar("source_type", { length: 80 }).notNull(),
+  sourceUrl: text("source_url").notNull(),
+  academicYear: varchar("academic_year", { length: 20 }).notNull(),
+  status: varchar("status", { length: 32 }).notNull(),
+  verificationStatus: varchar("verification_status", { length: 32 }).notNull(),
+  notes: text("notes").notNull(),
+});
+
+export const curriculumAliases = pgTable("curriculum_aliases", {
+  id: varchar("id", { length: 220 }).primaryKey(),
+  curriculumSubjectId: uuid("curriculum_subject_id").notNull().references(() => curriculumSubjects.id, { onDelete: "cascade" }),
+  gradeNumber: smallint("grade_number").notNull(),
+  alias: text("alias").notNull(),
+  normalizedAlias: varchar("normalized_alias", { length: 160 }).notNull(),
+  mappingType: varchar("mapping_type", { length: 48 }).notNull(),
+  confidence: varchar("confidence", { length: 32 }).notNull(),
+  notes: text("notes").notNull(),
+}, (table) => [uniqueIndex("curriculum_alias_normalized_unique").on(table.gradeNumber, table.normalizedAlias, table.curriculumSubjectId)]);
+
+export const curriculumValidationIssues = pgTable("curriculum_validation_issues", {
+  id: varchar("id", { length: 220 }).primaryKey(),
+  severity: varchar("severity", { length: 24 }).notNull(),
+  entityType: varchar("entity_type", { length: 48 }).notNull(),
+  entityCanonicalId: varchar("entity_canonical_id", { length: 320 }).notNull(),
+  issueType: varchar("issue_type", { length: 80 }).notNull(),
+  description: text("description").notNull(),
+  requiredAction: text("required_action").notNull(),
+  sourceId: varchar("source_id", { length: 180 }),
+  sourceUrl: text("source_url").notNull(),
+  status: varchar("status", { length: 32 }).notNull(),
+});
 
 export const curriculumClasses = pgTable("curriculum_classes", {
   id: uuid("id").primaryKey().defaultRandom(),
   versionId: uuid("version_id").notNull().references(() => curriculumVersions.id, { onDelete: "cascade" }),
   name: varchar("name", { length: 40 }).notNull(),
   ordinal: integer("ordinal").notNull(),
-}, (table) => [uniqueIndex("curriculum_class_unique").on(table.versionId, table.name)]);
+  canonicalKey: varchar("canonical_key", { length: 180 }),
+  sourceUrl: text("source_url"),
+  provenance: text("provenance"),
+}, (table) => [uniqueIndex("curriculum_class_unique").on(table.versionId, table.name), uniqueIndex("curriculum_class_key_unique").on(table.versionId, table.canonicalKey)]);
 
 export const curriculumSubjects = pgTable("curriculum_subjects", {
   id: uuid("id").primaryKey().defaultRandom(),
   classId: uuid("class_id").notNull().references(() => curriculumClasses.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   ordinal: integer("ordinal").notNull(),
-}, (table) => [uniqueIndex("curriculum_subject_unique").on(table.classId, table.name)]);
+  canonicalKey: varchar("canonical_key", { length: 220 }),
+  sourceUrl: text("source_url"),
+  provenance: text("provenance"),
+  sourceType: varchar("source_type", { length: 40 }),
+}, (table) => [uniqueIndex("curriculum_subject_unique").on(table.classId, table.name), uniqueIndex("curriculum_subject_key_unique").on(table.classId, table.canonicalKey)]);
 
 export const curriculumBooks = pgTable("curriculum_books", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -129,7 +184,11 @@ export const curriculumBooks = pgTable("curriculum_books", {
   title: text("title").notNull(),
   sourceUrl: text("source_url").notNull(),
   ordinal: integer("ordinal").notNull(),
-}, (table) => [uniqueIndex("curriculum_book_unique").on(table.subjectId, table.title)]);
+  canonicalKey: varchar("canonical_key", { length: 240 }),
+  sourceLabel: text("source_label"),
+  sourceType: varchar("source_type", { length: 40 }),
+  checksum: varchar("checksum", { length: 128 }),
+}, (table) => [uniqueIndex("curriculum_book_unique").on(table.subjectId, table.title), uniqueIndex("curriculum_book_key_unique").on(table.subjectId, table.canonicalKey)]);
 
 export const curriculumChapters = pgTable("curriculum_chapters", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -137,7 +196,9 @@ export const curriculumChapters = pgTable("curriculum_chapters", {
   title: text("title").notNull(),
   ordinal: integer("ordinal").notNull(),
   sourceUrl: text("source_url").notNull(),
-}, (table) => [uniqueIndex("curriculum_chapter_unique").on(table.bookId, table.title)]);
+  canonicalKey: varchar("canonical_key", { length: 260 }),
+  provenance: text("provenance"),
+}, (table) => [uniqueIndex("curriculum_chapter_unique").on(table.bookId, table.title), uniqueIndex("curriculum_chapter_key_unique").on(table.bookId, table.canonicalKey)]);
 
 export const curriculumTopics = pgTable("curriculum_topics", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -147,7 +208,8 @@ export const curriculumTopics = pgTable("curriculum_topics", {
   guidance: jsonb("guidance").notNull(),
   provenance: text("provenance").notNull(),
   sourceUrl: text("source_url").notNull(),
-}, (table) => [uniqueIndex("curriculum_topic_unique").on(table.chapterId, table.title)]);
+  canonicalKey: varchar("canonical_key", { length: 280 }),
+}, (table) => [uniqueIndex("curriculum_topic_unique").on(table.chapterId, table.title), uniqueIndex("curriculum_topic_key_unique").on(table.chapterId, table.canonicalKey)]);
 
 export const lessons = pgTable("lessons", {
   id: uuid("id").primaryKey().defaultRandom(),
