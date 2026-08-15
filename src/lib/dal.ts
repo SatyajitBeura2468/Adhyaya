@@ -23,6 +23,7 @@ import type { CurriculumRecord, LessonRecord, WorkspaceBootstrap } from "@/lib/a
 import { auth, authConfigured } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { generateLesson, lessonContentSchema } from "@/lib/lesson";
+import { normalizeOnboardingInput } from "@/lib/onboarding";
 
 export class AuthorizationError extends Error {}
 export class ConfigurationError extends Error {}
@@ -117,7 +118,7 @@ const setupSchema = z.object({
 
 export async function saveSetup(context: ViewerContext, input: unknown) {
   if (context.role !== "owner") throw new AuthorizationError("Only workspace owners can change setup.");
-  const values = setupSchema.parse(input);
+  const values = setupSchema.parse(normalizeOnboardingInput(input));
   const database = db();
   await database.update(workspaces).set({ name: values.workspaceName, schoolName: values.schoolName || null, onboardingCompletedAt: new Date(), updatedAt: new Date() }).where(eq(workspaces.id, context.workspaceId));
   await database.insert(teacherProfiles).values({ userId: context.userId, displayName: values.displayName, defaultDurationMinutes: values.defaultDurationMinutes, updatedAt: new Date() }).onConflictDoUpdate({ target: teacherProfiles.userId, set: { displayName: values.displayName, defaultDurationMinutes: values.defaultDurationMinutes, updatedAt: new Date() } });
