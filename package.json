@@ -12,7 +12,9 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "curriculum:import": "node scripts/import-curriculum.mjs",
-    "curriculum:audit": "node scripts/import-curriculum.mjs --audit"
+    "curriculum:audit": "node scripts/import-curriculum.mjs --audit",
+    "curriculum:supplement": "node scripts/import-curriculum.mjs --supplement",
+    "curriculum:supplement:audit": "node scripts/import-curriculum.mjs --supplement --audit"
   },
   "dependencies": {
     "@neondatabase/auth": "^0.5.0-beta",

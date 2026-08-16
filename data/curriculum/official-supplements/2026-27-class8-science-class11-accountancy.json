@@ -1,0 +1,80 @@
+{
+  "release": "2026-27.1",
+  "board": "CBSE",
+  "academicYear": "2026-27",
+  "sources": [
+    {
+      "sourceId": "NCERT-2026-27-C08-CURIOSITY-CH05",
+      "authority": "NCERT",
+      "title": "Curiosity - Textbook of Science for Grade 8, Chapter 5: Exploring Forces",
+      "sourceType": "NCERT_TEXTBOOK",
+      "url": "https://www.ncert.nic.in/textbook.php?hecu1=5-13",
+      "academicYear": "2026-27",
+      "status": "ACTIVE",
+      "verificationStatus": "VERIFIED_A",
+      "notes": "Official NCERT textbook catalogue; Grade 8 Curiosity is listed with 13 chapters. Chapter 5 PDF is marked Reprint 2026-27."
+    },
+    {
+      "sourceId": "CBSE-2026-27-C11-ACCOUNTANCY-055",
+      "authority": "CBSE",
+      "title": "Accountancy (055) Class XI Curriculum 2026-27",
+      "sourceType": "CBSE_SYLLABUS",
+      "url": "https://cbseacademic.nic.in/web_material/CurriculumMain27/SecPart2/Accountancy_SecP2_2026-27.pdf",
+      "academicYear": "2026-27",
+      "status": "ACTIVE",
+      "verificationStatus": "VERIFIED_A",
+      "notes": "Official CBSE curriculum PDF for Accountancy subject code 055, Class XI, session 2026-27."
+    }
+  ],
+  "supplements": [
+    {
+      "classCanonicalKey": "CBSE-2026-27-C08",
+      "subjectCanonicalKey": "CBSE-2026-27-C08-ACAD-SCIENCE",
+      "bookCanonicalKey": "CBSE-2026-27-C08-ACAD-SCIENCE-SRC-CURIOSITY",
+      "removeEmptyScopeCanonicalKey": "CBSE-2026-27-C08-ACAD-SCIENCE-SRC-CURIOSITY-U001",
+      "chapters": [
+        {
+          "chapterId": "CBSE-2026-27-C08-ACAD-SCIENCE-SRC-CURIOSITY-CH005",
+          "ordinal": 5,
+          "title": "Exploring Forces",
+          "sourceId": "NCERT-2026-27-C08-CURIOSITY-CH05",
+          "sourceUrl": "https://www.ncert.nic.in/textbook.php?hecu1=5-13",
+          "verificationStatus": "VERIFIED_A",
+          "topics": [
+            { "topicId": "CBSE-2026-27-C08-ACAD-SCIENCE-SRC-CURIOSITY-CH005-T001", "ordinal": 1, "title": "What Is a Force?", "keyConcept": "A force is a push or pull resulting from an interaction between objects.", "sourceUrl": "https://www.ncert.nic.in/textbook.php?hecu1=5-13", "verificationStatus": "VERIFIED_A" },
+            { "topicId": "CBSE-2026-27-C08-ACAD-SCIENCE-SRC-CURIOSITY-CH005-T002", "ordinal": 2, "title": "What Can a Force Do to the Objects on Which It Is Applied?", "keyConcept": "Force can change an object's motion, speed, direction, or shape.", "sourceUrl": "https://www.ncert.nic.in/textbook.php?hecu1=5-13", "verificationStatus": "VERIFIED_A" },
+            { "topicId": "CBSE-2026-27-C08-ACAD-SCIENCE-SRC-CURIOSITY-CH005-T003", "ordinal": 3, "title": "Are Forces an Interaction Between Two or More Objects?", "keyConcept": "Forces arise through interactions between objects.", "sourceUrl": "https://www.ncert.nic.in/textbook.php?hecu1=5-13", "verificationStatus": "VERIFIED_A" },
+            { "topicId": "CBSE-2026-27-C08-ACAD-SCIENCE-SRC-CURIOSITY-CH005-T004", "ordinal": 4, "title": "Contact Forces", "keyConcept": "Contact forces require physical contact between interacting objects.", "sourceUrl": "https://www.ncert.nic.in/textbook.php?hecu1=5-13", "verificationStatus": "VERIFIED_A" },
+            { "topicId": "CBSE-2026-27-C08-ACAD-SCIENCE-SRC-CURIOSITY-CH005-T005", "ordinal": 5, "title": "Friction", "keyConcept": "Friction is a contact force that opposes motion between surfaces in contact.", "sourceUrl": "https://www.ncert.nic.in/textbook.php?hecu1=5-13", "verificationStatus": "VERIFIED_A" },
+            { "topicId": "CBSE-2026-27-C08-ACAD-SCIENCE-SRC-CURIOSITY-CH005-T006", "ordinal": 6, "title": "Non-contact Forces", "keyConcept": "Some forces act at a distance without physical contact.", "sourceUrl": "https://www.ncert.nic.in/textbook.php?hecu1=5-13", "verificationStatus": "VERIFIED_A" },
+            { "topicId": "CBSE-2026-27-C08-ACAD-SCIENCE-SRC-CURIOSITY-CH005-T007", "ordinal": 7, "title": "Magnetic Force", "keyConcept": "Magnets exert forces of attraction or repulsion without direct contact.", "sourceUrl": "https://www.ncert.nic.in/textbook.php?hecu1=5-13", "verificationStatus": "VERIFIED_A" },
+            { "topicId": "CBSE-2026-27-C08-ACAD-SCIENCE-SRC-CURIOSITY-CH005-T008", "ordinal": 8, "title": "Electrostatic Force", "keyConcept": "Charged objects can attract or repel through electrostatic force.", "sourceUrl": "https://www.ncert.nic.in/textbook.php?hecu1=5-13", "verificationStatus": "VERIFIED_A" },
+            { "topicId": "CBSE-2026-27-C08-ACAD-SCIENCE-SRC-CURIOSITY-CH005-T009", "ordinal": 9, "title": "Gravitational Force", "keyConcept": "Gravity is the attractive force with which Earth pulls objects toward itself.", "sourceUrl": "https://www.ncert.nic.in/textbook.php?hecu1=5-13", "verificationStatus": "VERIFIED_A" },
+            { "topicId": "CBSE-2026-27-C08-ACAD-SCIENCE-SRC-CURIOSITY-CH005-T010", "ordinal": 10, "title": "Weight and Its Measurement", "keyConcept": "Weight is gravitational force and is measured in newtons using instruments such as a spring balance.", "sourceUrl": "https://www.ncert.nic.in/textbook.php?hecu1=5-13", "verificationStatus": "VERIFIED_A" },
+            { "topicId": "CBSE-2026-27-C08-ACAD-SCIENCE-SRC-CURIOSITY-CH005-T011", "ordinal": 11, "title": "Floating and Sinking", "keyConcept": "Buoyant force and gravity determine whether an object floats or sinks in a liquid.", "sourceUrl": "https://www.ncert.nic.in/textbook.php?hecu1=5-13", "verificationStatus": "VERIFIED_A" }
+          ]
+        }
+      ]
+    },
+    {
+      "classCanonicalKey": "CBSE-2026-27-C11",
+      "subjectCanonicalKey": "CBSE-2026-27-C11-ACAD-ACCOUNTANCY",
+      "bookCanonicalKey": "CBSE-2026-27-C11-ACAD-ACCOUNTANCY-SRC-OFFICIAL-2026-27-CURRICULUM-ACCOUNTANCY",
+      "removeEmptyScopeCanonicalKey": "CBSE-2026-27-C11-ACAD-ACCOUNTANCY-SRC-OFFICIAL-2026-27-CURRICULUM-ACCOUNTANCY-U001",
+      "chapters": [
+        {
+          "chapterId": "CBSE-2026-27-C11-ACAD-ACCOUNTANCY-SRC-OFFICIAL-2026-27-CURRICULUM-ACCOUNTANCY-U003",
+          "ordinal": 3,
+          "title": "Financial Statements of Sole Proprietorship",
+          "sourceId": "CBSE-2026-27-C11-ACCOUNTANCY-055",
+          "sourceUrl": "https://cbseacademic.nic.in/web_material/CurriculumMain27/SecPart2/Accountancy_SecP2_2026-27.pdf",
+          "verificationStatus": "VERIFIED_A",
+          "topics": [
+            { "topicId": "CBSE-2026-27-C11-ACAD-ACCOUNTANCY-SRC-OFFICIAL-2026-27-CURRICULUM-ACCOUNTANCY-U003-T001", "ordinal": 1, "title": "Financial Statements", "keyConcept": "Prepare trading and profit and loss accounts and a balance sheet for a sole proprietorship, including prescribed adjustments.", "sourceUrl": "https://cbseacademic.nic.in/web_material/CurriculumMain27/SecPart2/Accountancy_SecP2_2026-27.pdf", "verificationStatus": "VERIFIED_A" },
+            { "topicId": "CBSE-2026-27-C11-ACAD-ACCOUNTANCY-SRC-OFFICIAL-2026-27-CURRICULUM-ACCOUNTANCY-U003-T002", "ordinal": 2, "title": "Incomplete Records", "keyConcept": "Ascertain profit or loss using the statement of affairs method for incomplete records.", "sourceUrl": "https://cbseacademic.nic.in/web_material/CurriculumMain27/SecPart2/Accountancy_SecP2_2026-27.pdf", "verificationStatus": "VERIFIED_A" }
+          ]
+        }
+      ]
+    }
+  ]
+}

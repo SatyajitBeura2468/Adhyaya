@@ -10,7 +10,7 @@ test.describe("authenticated teacher workflow", () => {
     await expect(page.getByRole("heading", { name: /good (morning|afternoon|evening)/i })).toBeVisible();
 
     await page.getByRole("button", { name: "Settings" }).click();
-    await expect(page.getByRole("heading", { name: "Canonical subject assignments" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Assign a subject to a section" })).toBeVisible();
     const settingsClassSelect = page.getByLabel("Class and section");
     await expect(settingsClassSelect).toBeVisible();
     await expect(page.getByLabel("Verified subject")).toBeDisabled();
@@ -19,7 +19,7 @@ test.describe("authenticated teacher workflow", () => {
     await expect(settingsSubjectSelect).toBeEnabled();
 
     await page.getByRole("button", { name: "Create" }).click();
-    await expect(page.getByRole("heading", { name: "Create lesson" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Build a lesson, step by step." })).toBeVisible();
     const classSelect = page.getByLabel("Class and section");
     await classSelect.selectOption({ index: 1 });
     const subjectSelect = page.getByLabel("Subject");
@@ -33,6 +33,7 @@ test.describe("authenticated teacher workflow", () => {
     await chapterSelect.selectOption({ index: 1 });
     const topicSelect = page.getByLabel("Topic / subtopic");
     await expect(topicSelect).toBeEnabled();
+    await expect(page.getByText("LIVE LESSON BRIEF")).toBeVisible();
     await topicSelect.selectOption({ index: 1 });
     await page.getByRole("button", { name: "Generate lesson plan" }).click();
     await expect(page.getByText("Saved", { exact: true })).toBeVisible();

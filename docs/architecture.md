@@ -25,9 +25,11 @@ The page is dynamic and redirects unsigned visitors to sign-in. A first authenti
 
 ## Curriculum import contract
 
-`scripts/import-curriculum.mjs` accepts one versioned JSON source with a complete nested hierarchy. It rejects malformed URLs, missing teaching guidance, malformed year/version values, and duplicate natural topic paths before any database operation. A SHA-256 checksum identifies the imported source version. Every level uses a unique natural key plus `ON CONFLICT` upserts, making re-runs safe.
+`scripts/import-curriculum.mjs` accepts a versioned JSON source with a complete nested hierarchy. It rejects malformed URLs, missing teaching guidance, malformed year/version values, and duplicate natural topic paths before any database operation. A SHA-256 checksum identifies the imported source version. Every level uses a unique natural key plus `ON CONFLICT` upserts, making re-runs safe.
 
-`npm run curriculum:audit` validates and reports class, subject, book, chapter, and topic coverage without connecting to the database. The included file is explicitly scoped; more coverage must be derived and reviewed from official CBSE/NCERT documents before importing.
+`npm run curriculum:audit` validates and reports class, subject, book, chapter, and topic coverage without connecting to the database. `npm run curriculum:supplement:audit` performs the same preflight validation for a narrowly scoped official correction. Supplements remain separate from the verified package, target an existing canonical class/subject/book by key, accept only active `VERIFIED_A` data, and retain source IDs, URLs, and provenance. A stale empty syllabus scope can be removed only if it has neither topics nor lesson references.
+
+The browser receives curriculum records for its workspace's canonical class IDs. Create Lesson then resolves `classSectionId → curriculumClassId → curriculumSubjectId → book/syllabus → chapter/unit → topic`; a section label is never used for curriculum matching. The server repeats this ownership and class-subject check before it creates the workspace subject and teaching assignment automatically.
 
 ## Exports and generation
 

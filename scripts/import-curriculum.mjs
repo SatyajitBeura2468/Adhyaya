@@ -3,9 +3,65 @@ import { readFile } from "node:fs/promises";
 import postgres from "postgres";
 import { z } from "zod";
 
-const source = process.argv.find((value) => value.endsWith(".json")) ?? "data/curriculum/Adhyaya_Curriculum_2026-27.json";
+const supplementMode = process.argv.includes("--supplement");
+const source = process.argv.find((value) => value.endsWith(".json")) ?? (supplementMode ? "data/curriculum/official-supplements/2026-27-class8-science-class11-accountancy.json" : "data/curriculum/Adhyaya_Curriculum_2026-27.json");
 const auditOnly = process.argv.includes("--audit");
 const raw = JSON.parse(await readFile(source, "utf8"));
+
+const supplementSourceSchema = z.object({ sourceId: z.string().min(1), authority: z.string().min(1), title: z.string().min(1), sourceType: z.string().min(1), url: z.url(), academicYear: z.literal("2026-27"), status: z.literal("ACTIVE"), verificationStatus: z.literal("VERIFIED_A"), notes: z.string().min(1) });
+const supplementTopicSchema = z.object({ topicId: z.string().min(1), ordinal: z.number().int().positive(), title: z.string().min(1), keyConcept: z.string().min(1), sourceUrl: z.url(), verificationStatus: z.literal("VERIFIED_A") });
+const supplementChapterSchema = z.object({ chapterId: z.string().min(1), ordinal: z.number().int().positive(), title: z.string().min(1), sourceId: z.string().min(1), sourceUrl: z.url(), verificationStatus: z.literal("VERIFIED_A"), topics: z.array(supplementTopicSchema).min(1) });
+const supplementSchema = z.object({ release: z.string().min(1), board: z.literal("CBSE"), academicYear: z.literal("2026-27"), sources: z.array(supplementSourceSchema).min(1), supplements: z.array(z.object({ classCanonicalKey: z.string().min(1), subjectCanonicalKey: z.string().min(1), bookCanonicalKey: z.string().min(1), removeEmptyScopeCanonicalKey: z.string().min(1), chapters: z.array(supplementChapterSchema).min(1) })).min(1) });
+
+if (supplementMode) {
+  const supplement = supplementSchema.parse(raw);
+  const sourceIds = new Set(supplement.sources.map((item) => item.sourceId));
+  const canonicalIds = supplement.supplements.flatMap((item) => item.chapters.flatMap((chapter) => [chapter.chapterId, ...chapter.topics.map((topic) => topic.topicId)]));
+  if (sourceIds.size !== supplement.sources.length) throw new Error("Duplicate official source IDs in curriculum supplement.");
+  if (new Set(canonicalIds).size !== canonicalIds.length) throw new Error("Duplicate canonical IDs in curriculum supplement.");
+  for (const item of supplement.supplements) for (const chapter of item.chapters) if (!sourceIds.has(chapter.sourceId)) throw new Error(`Unknown source ID in curriculum supplement: ${chapter.sourceId}`);
+  const counts = { chapters: supplement.supplements.reduce((total, item) => total + item.chapters.length, 0), topics: supplement.supplements.reduce((total, item) => total + item.chapters.reduce((chapterTotal, chapter) => chapterTotal + chapter.topics.length, 0), 0) };
+  const summary = { status: "valid", release: supplement.release, source, supplements: supplement.supplements.length, ...counts };
+  if (auditOnly) { console.log(JSON.stringify(summary, null, 2)); process.exit(0); }
+  if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required.");
+  const sql = postgres(process.env.DATABASE_URL, { max: 1, prepare: false });
+  const checksum = createHash("sha256").update(JSON.stringify(supplement)).digest("hex");
+  const guidance = (concept) => ({ concept, outcomes: [`Plan learning around ${concept}`], activities: ["Use the verified topic as the lesson focus."], materials: ["Teacher-selected materials"], checks: ["Check understanding of the selected topic."], assignment: "Set a context-appropriate follow-up task." });
+  try {
+    await sql.begin(async (tx) => {
+      for (const item of supplement.sources) {
+        await tx`INSERT INTO curriculum_sources (id, authority, title, source_type, source_url, academic_year, status, verification_status, notes)
+          VALUES (${item.sourceId}, ${item.authority}, ${item.title}, ${item.sourceType}, ${item.url}, ${item.academicYear}, ${item.status}, ${item.verificationStatus}, ${item.notes})
+          ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, source_url = EXCLUDED.source_url, status = EXCLUDED.status, verification_status = EXCLUDED.verification_status, notes = EXCLUDED.notes`;
+      }
+      const [version] = await tx`SELECT id FROM curriculum_versions WHERE board = ${supplement.board} AND academic_year = ${supplement.academicYear} AND canonical_key = 'CBSE-2026-27' ORDER BY imported_at DESC LIMIT 1`;
+      if (!version) throw new Error("The base CBSE 2026-27 curriculum version must be imported before its official supplement.");
+      for (const item of supplement.supplements) {
+        const [book] = await tx`SELECT books.id FROM curriculum_books AS books
+          INNER JOIN curriculum_subjects AS subjects ON subjects.id = books.subject_id
+          INNER JOIN curriculum_classes AS classes ON classes.id = subjects.class_id
+          WHERE classes.version_id = ${version.id} AND classes.canonical_key = ${item.classCanonicalKey} AND subjects.canonical_key = ${item.subjectCanonicalKey} AND books.canonical_key = ${item.bookCanonicalKey}
+          LIMIT 1`;
+        if (!book) throw new Error(`Supplement target was not found: ${item.bookCanonicalKey}`);
+        const staleScopes = await tx`SELECT chapters.id FROM curriculum_chapters AS chapters WHERE chapters.book_id = ${book.id} AND chapters.canonical_key = ${item.removeEmptyScopeCanonicalKey} AND NOT EXISTS (SELECT 1 FROM curriculum_topics AS topics WHERE topics.chapter_id = chapters.id) AND NOT EXISTS (SELECT 1 FROM lessons WHERE lessons.topic_id IN (SELECT id FROM curriculum_topics WHERE chapter_id = chapters.id))`;
+        for (const stale of staleScopes) await tx`DELETE FROM curriculum_chapters WHERE id = ${stale.id}`;
+        for (const chapter of item.chapters) {
+          const [chapterRow] = await tx`INSERT INTO curriculum_chapters (book_id, title, ordinal, source_url, canonical_key, provenance)
+            VALUES (${book.id}, ${chapter.title}, ${chapter.ordinal}, ${chapter.sourceUrl}, ${chapter.chapterId}, ${`${chapter.verificationStatus} · ${chapter.sourceId}`})
+            ON CONFLICT (book_id, canonical_key) DO UPDATE SET title = EXCLUDED.title, ordinal = EXCLUDED.ordinal, source_url = EXCLUDED.source_url, provenance = EXCLUDED.provenance
+            RETURNING id`;
+          for (const topic of chapter.topics) {
+            await tx`INSERT INTO curriculum_topics (chapter_id, title, ordinal, guidance, provenance, source_url, canonical_key)
+              VALUES (${chapterRow.id}, ${topic.title}, ${topic.ordinal}, ${tx.json(guidance(topic.keyConcept))}, ${`${topic.verificationStatus} · ${chapter.sourceId}`}, ${topic.sourceUrl}, ${topic.topicId})
+              ON CONFLICT (chapter_id, canonical_key) DO UPDATE SET title = EXCLUDED.title, ordinal = EXCLUDED.ordinal, guidance = EXCLUDED.guidance, provenance = EXCLUDED.provenance, source_url = EXCLUDED.source_url`;
+          }
+        }
+      }
+    });
+    console.log(JSON.stringify({ ...summary, status: "imported", checksum }, null, 2));
+  } finally { await sql.end(); }
+  process.exit(0);
+}
 const sourceSchema = z.object({ sourceId: z.string().min(1), authority: z.string().min(1), title: z.string().min(1), sourceType: z.string().min(1), url: z.url(), academicYear: z.string().min(1), status: z.string().min(1), verificationStatus: z.enum(["VERIFIED_A", "VERIFIED_B", "REVIEW", "WITHDRAWN"]), notes: z.string() });
 const topicSchema = z.object({ topicId: z.string().min(1), ordinal: z.number().int().positive(), title: z.string().min(1), keyConcept: z.string().min(1), sourceUrl: z.url(), verificationStatus: z.string(), active: z.boolean(), notes: z.string() });
 const unitSchema = z.object({ chapterId: z.string().min(1), ordinal: z.number().int().positive(), title: z.string().min(1), unitType: z.string().min(1), sourceUrl: z.url(), verificationStatus: z.string(), active: z.boolean(), topics: z.array(topicSchema) });

@@ -17,14 +17,18 @@ See [architecture documentation](docs/architecture.md) for the data model and au
 
 ## Curriculum data
 
-Curriculum data lives in structured JSON under `data/curriculum/`, never in React. The included 2026–27 dataset is an official-source-backed Class VIII Mathematics release with 16 ordered NCERT chapter records. It is deliberately labelled to its source and is not a claim of nationwide coverage. Add further class/subject datasets only after verifying their chapter/topic hierarchy from the current official source.
+Curriculum data lives in structured JSON under `data/curriculum/`, never in React. The verified package is imported through a canonical hierarchy (`class → subject → book/syllabus → chapter/unit → topic`) and runtime selection uses database IDs, never class or subject display-name matching.
+
+Official, production-safe corrections to an already-imported release live under `data/curriculum/official-supplements/`. They are intentionally separate from the verified package: a supplement may only add `VERIFIED_A`, active records backed by its retained official source URL and checksum. The importer refuses to promote review or withdrawn material.
 
 ```bash
 npm run curriculum:audit
 npm run curriculum:import
+npm run curriculum:supplement:audit
+npm run curriculum:supplement
 ```
 
-The importer validates the complete hierarchy, rejects malformed or duplicate topic paths, records a source checksum/version, and upserts safely on reruns. It will refuse to run without `DATABASE_URL`.
+The importer validates the complete hierarchy, rejects malformed or duplicate topic paths, records a source checksum/version, and upserts safely on reruns. It will refuse to run without `DATABASE_URL`. Supplements identify the exact existing canonical book/syllabus and can remove an empty scope only when it has no topic or saved-lesson references.
 
 Official source roots:
 
